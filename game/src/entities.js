@@ -1,6 +1,7 @@
 // Simulation: the player (on foot / driving), traffic, pedestrians, police response and crime heat.
 import { WORLD, WATER_Y, ROAD_XS, ROAD_YS, STEP, PLAYER_FOOT_SPEED, CAR_MAX_SPEED,
-  CAR_ACCEL, CAR_BRAKE, CAR_REVERSE, CAR_TURN, HEALTH_MAX, WANTED_MAX, NEON } from './config.js';
+  CAR_ACCEL, CAR_BRAKE, CAR_REVERSE, CAR_TURN, HEALTH_MAX, WANTED_MAX, NEON,
+  STORM, RADAR } from './config.js';
 import { createRandom, pick } from './random.js';
 import { buildCity, resolveCollision, pointInBuilding } from './city.js';
 
@@ -21,9 +22,11 @@ export function createState(seed = 1337) {
     player: { x: city.spawn.x, y: city.spawn.y, angle: 0.6, health: HEALTH_MAX, cash: 0, onFoot: true, carId: -1, punchCd: 0, hurtCd: 0, hurtFlash: 0 },
     cars: [], peds: [],
     wanted: 0, evadeT: 0, spawnT: 0, decayMsg: '',
+    storm: { active: false, x: WORLD.w * 0.5, y: WATER_Y + 80, vx: 0, vy: -STORM.speed, t: 0, nextIn: STORM.interval * 0.6 },
+    radarAngle: 0, pingCd: 0,
     missions: { index: 0, stage: 0, taken: [] },
     banner: null, // {text, sub, timer}
-    stats: { earned: 0, crimes: 0, takenCars: 0 },
+    stats: { earned: 0, crimes: 0, takenCars: 0, surge: 0 },
     camera: { x: city.spawn.x, y: city.spawn.y },
     shake: 0, message: '', msgT: 0,
     complete: false,
@@ -98,6 +101,26 @@ export function addWanted(state, n) {
   if (state.wanted > before) { state.stats.crimes += 1; state.evadeT = 0; }
 }
 
+/** 0 outside the storm cell, ramps to 1 at its core. */
+export function stormFactor(state, x, y) {
+  if (!state.storm || !state.storm.active) return 0;
+  const d = Math.hypot(x - state.storm.x, y - state.storm.y);
+  if (d >= STORM.radius) return 0;
+  return 1 - d / STORM.radius;
+}
+
+export function inStorm(state, x, y) { return stormFactor(state, x, y) > 0; }
+
+/** Angular distance between the radar sweep and the bearing to (x, y) from the tower. */
+export function radarSweepDelta(state, x, y) {
+  const tower = state.city.radarTower ?? { x: 1275, y: WATER_Y + 165 };
+  const bearing = Math.atan2(y - tower.y, x - tower.x);
+  let diff = state.radarAngle - bearing;
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+  return Math.abs(diff);
+}
+
 export function nearestCar(state, x, y, maxDist) {
   let best = null, bestD = maxDist;
   for (const car of state.cars) {
@@ -169,6 +192,8 @@ export function update(state, dt, input, audio) {
   updatePeds(state, dt);
   updatePolice(state, dt, audio);
   updateWanted(state, dt, audio);
+  updateStorm(state, dt, audio);
+  updateRadar(state, dt, audio);
 
   // slow health recovery out of danger
   if (p.health > 0 && state.wanted === 0 && p.health < HEALTH_MAX) p.health = Math.min(HEALTH_MAX, p.health + 2.2 * dt);
@@ -204,17 +229,20 @@ function updateDriving(state, dt, input, audio) {
   const p = state.player;
   const car = carOf(state); if (!car) { p.onFoot = true; return; }
   const stats = KIND_STATS[car.kind];
+  const soaked = inStorm(state, car.x, car.y);
+  const grip = soaked ? STORM.steerLoss : 1;
+  const push = soaked ? STORM.accelLoss : 1;
   const fwd = input.down('KeyW') || input.down('ArrowUp');
   const back = input.down('KeyS') || input.down('ArrowDown');
   const left = input.down('KeyA') || input.down('ArrowLeft');
   const right = input.down('KeyD') || input.down('ArrowRight');
-  if (fwd) car.speed += stats.accel * dt;
+  if (fwd) car.speed += stats.accel * push * dt;
   else if (back) car.speed -= (car.speed > 20 ? CAR_BRAKE : CAR_ACCEL * 0.7) * dt;
   else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 90 * dt);
-  car.speed = Math.max(-CAR_REVERSE, Math.min(stats.max, car.speed));
+  car.speed = Math.max(-CAR_REVERSE, Math.min(stats.max * (soaked ? 0.92 : 1), car.speed));
   const steer = (left ? -1 : 0) + (right ? 1 : 0);
   if (steer !== 0 && Math.abs(car.speed) > 12) {
-    car.angle += steer * stats.turn * dt * Math.min(1, Math.abs(car.speed) / 130) * Math.sign(car.speed);
+    car.angle += steer * stats.turn * grip * dt * Math.min(1, Math.abs(car.speed) / 130) * Math.sign(car.speed);
   }
   const nx = car.x + Math.cos(car.angle) * car.speed * dt;
   const ny = car.y + Math.sin(car.angle) * car.speed * dt;
@@ -321,7 +349,8 @@ function updateWanted(state, dt, audio) {
   const near = cops.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < 480);
   if (near) state.evadeT = 0;
   else {
-    state.evadeT += dt;
+    // the storm cell swallows the search — heat fades faster inside the surge
+    state.evadeT += dt * (inStorm(state, p.x, p.y) ? STORM.evadeBoost : 1);
     if (state.evadeT > 4.2) {
       state.wanted = Math.max(0, state.wanted - 1);
       state.evadeT = 0;
@@ -329,6 +358,52 @@ function updateWanted(state, dt, audio) {
       state.msgT = 2;
       audio.blip();
     }
+  }
+}
+
+function updateStorm(state, dt, audio) {
+  const s = state.storm;
+  if (s.active) {
+    s.t -= dt;
+    s.x += s.vx * dt; s.y += s.vy * dt;
+    s.x = Math.max(120, Math.min(WORLD.w - 120, s.x));
+    if (s.t <= 0) {
+      s.active = false; s.nextIn = STORM.interval;
+      state.message = 'The surge breaks — clear skies over Port Meridian'; state.msgT = 2.4;
+    }
+    return;
+  }
+  s.nextIn -= dt;
+  if (s.nextIn <= 0) {
+    const r = state.rng();
+    s.active = true;
+    s.x = WORLD.w * (0.25 + r * 0.5);
+    s.y = WATER_Y + 90;
+    s.vx = (state.rng() - 0.5) * STORM.drift * 2;
+    s.vy = -STORM.speed;
+    s.t = STORM.duration;
+    state.message = 'STORM SURGE — the harbor is whiteout. Ride it or run it.';
+    state.msgT = 3.2;
+    if (audio.stormWarning) audio.stormWarning();
+  }
+}
+
+function updateRadar(state, dt, audio) {
+  state.radarAngle = (state.radarAngle + (dt * Math.PI * 2) / RADAR.period) % (Math.PI * 2);
+  state.pingCd = Math.max(0, state.pingCd - dt);
+  const p = state.player;
+  if (state.wanted <= 0 || state.pingCd > 0) return;
+  const tower = state.city.radarTower;
+  if (!tower) return;
+  const dist = Math.hypot(p.x - tower.x, p.y - tower.y);
+  if (dist > RADAR.range) return;
+  if (radarSweepDelta(state, p.x, p.y) < RADAR.sweep / 2) {
+    state.pingCd = RADAR.pingCooldown;
+    state.evadeT = 0;
+    state.message = 'HARBOR RADAR PING — the beam found you';
+    state.msgT = 2.2;
+    state.shake = Math.max(state.shake, 2);
+    if (audio.radarPing) audio.radarPing();
   }
 }
 

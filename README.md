@@ -6,9 +6,17 @@
 
 An original open-world crime game — a fictional neon port
 city, three contracts, traffic, stealable cars, a wanted level with police pursuit,
-and a HUD with a minimap. Plain static files under `game/`; no build step, no network,
+a HUD with a minimap, a **Storm Surge** system and a **harbor radar** that sweeps the
+bay for hot targets. Plain static files under `game/`; no build step, no network,
 no dependencies. All art is drawn in code (Canvas 2D) and all sound is synthesized
 (Web Audio). No real places, people, brands or games are depicted.
+
+**Neon Tide — Storm Surge.** Every so often a storm cell tears in off the harbor and
+drifts inland. Inside the whiteout your car handles like it is driving through soup,
+but the search loses you twice as fast — and every contract marker you tag while
+riding inside the surge pays a **+$250 Storm Tide bonus** on top of the contract
+money. Out on the middle pier, the harbor radar sweeps the bay; carry heat inside
+its beam and you get **pinged** — your evasion progress is wiped. Watch the dial.
 
 ## Run
 
@@ -42,10 +50,10 @@ deterministic stages (same seed every time):
 
 | File | Stage | Shows |
 | --- | --- | --- |
-| `1-cover.jpg` | `?shot=cover&seed=1337` | On foot in the city, HUD |
-| `2-car.jpg` | `?shot=car&seed=1337` | Driving, 2-star HEAT, minimap |
-| `3-chase.jpg` | `?shot=chase&seed=1337` | Mission objective + 3-star police pursuit |
-| `4-result.jpg` | `?shot=result&seed=1337` | Contracts complete, progression |
+| `1-cover.jpg` | `?shot=cover&seed=1337` | On foot in the city, HUD + radar dial |
+| `2-car.jpg` | `?shot=car&seed=1337` | Driving, 2-star HEAT, radar ping on the dial |
+| `3-chase.jpg` | `?shot=chase&seed=1337` | Mission objective + 3-star pursuit under a Storm Surge |
+| `4-result.jpg` | `?shot=result&seed=1337` | Contracts complete, progression + surge bonuses |
 
 Recapture them with headless Chrome:
 
@@ -65,8 +73,14 @@ Recapture them with headless Chrome:
 
 Verifies: the city generates with buildings/cars/pedestrians, the player stays in the
 world, car theft raises heat, the full three-contract chain pays out and sets the
-completion flag, police respond to a wanted level, lethal damage ends the run, and the
-best-run save is written to `localStorage`.
+completion flag, police respond to a wanted level, lethal damage ends the run, the
+best-run save is written to `localStorage` — and the Storm Surge machinery: the surge
+activates on schedule, rides at full strength at its core, markers tagged inside the
+cell pay +$250 (city-wide it does not), evasion accrues boosted inside the cell, and a
+hot player caught in the harbor radar beam is pinged with evasion wiped.
+
+Append `?storm=1` to the URL to force a Storm Surge at boot (handy for previewing the
+mechanic; `?shot=chase&storm=1` poses the surge during the pursuit stage).
 
 ## Dossier
 
@@ -79,8 +93,8 @@ best-run save is written to `localStorage`.
 
     game/index.html    shell page (canvas + status line)
     game/styles.css    page chrome
-    game/src/config.js tuning constants and palette
-    game/src/city.js   procedural city generation + static pre-render + collision
+    game/src/config.js tuning constants and palette (storm + radar tuning)
+    game/src/city.js   procedural city generation + static pre-render + collision (incl. radar tower)
     game/src/entities.js player, traffic, pedestrians, police AI, wanted logic
     game/src/missions.js the three contracts, markers, rewards
     game/src/render.js world/HUD/screens rendering, minimap

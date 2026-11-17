@@ -83,4 +83,64 @@ const saved = JSON.parse(localStorage.getItem('port-meridian-neon-tide-best'));
 assert.ok(saved.complete === true, 'completion persisted');
 assert.ok(saved.cash >= 2900, 'best cash persisted');
 
+// 10. storm surge activates on schedule and registers at its core
+const { stormFactor, inStorm, radarSweepDelta } = await import('../game/src/entities.js');
+const s4 = createState(99);
+assert.equal(s4.storm.active, false, 'storm starts dormant');
+s4.storm.nextIn = 0.05;
+run(s4, 1);
+assert.equal(s4.storm.active, true, 'storm surge activated after its timer');
+assert.ok(stormFactor(s4, s4.storm.x, s4.storm.y) > 0.9, 'storm core registers full strength');
+assert.equal(inStorm(s4, s4.storm.x + 9999, s4.storm.y), false, 'far away is dry');
+
+// 11. full contract chain ridden inside the surge pays the Storm Tide bonus per marker
+const s5 = createState(11);
+s5.storm.active = true; s5.storm.t = 999; s5.storm.nextIn = 999;
+const surgeTeleport = (state, x, y) => {
+  state.player.x = x; state.player.y = y;
+  state.storm.x = x; state.storm.y = y; // player rides inside the cell
+};
+surgeTeleport(s5, 535, 1880); checkTriggers(s5, audio);
+surgeTeleport(s5, 1300, 470); checkTriggers(s5, audio);
+assert.equal(s5.missions.index, 1, 'm1 complete inside the surge');
+assert.equal(s5.player.cash, 600 + 2 * 250, 'm1 rewards + 2 surge bonuses');
+for (const c of CRATES) { surgeTeleport(s5, c.x, c.y); checkTriggers(s5, audio); }
+assert.equal(s5.missions.index, 2, 'm2 complete inside the surge');
+for (const g of GATES) { surgeTeleport(s5, g.x, g.y); checkTriggers(s5, audio); }
+assert.equal(s5.missions.index, 3, 'm3 complete inside the surge');
+assert.equal(s5.player.cash, 2900 + 9 * 250, 'every marker paid the surge bonus');
+assert.equal(s5.stats.surge, 9, 'surge bonuses counted');
+
+// 12. a surge parked far away pays nothing — the cell pays, not the calendar
+const s6 = createState(12);
+s6.storm.active = true; s6.storm.t = 999; s6.storm.x = 100; s6.storm.y = 100; // far from markers
+const teleportFar = (state, x, y) => { state.player.x = x; state.player.y = y; };
+teleportFar(s6, 535, 1880); checkTriggers(s6, audio);
+teleportFar(s6, 1300, 470); checkTriggers(s6, audio);
+assert.equal(s6.player.cash, 600, 'no surge bonus outside the cell');
+assert.equal(s6.stats.surge, 0, 'surge counter stays zero');
+
+// 13. harbor radar ping: a hot player inside the beam loses evasion progress
+const s7 = createState(5);
+s7.wanted = 2;
+const tower = s7.city.radarTower;
+assert.ok(tower, 'radar tower exists in the city');
+s7.player.x = tower.x; s7.player.y = tower.y - 120; // inside RADAR.range
+s7.radarAngle = Math.atan2(s7.player.y - tower.y, s7.player.x - tower.x); // beam dead on
+s7.evadeT = 2.5; s7.pingCd = 0;
+assert.ok(radarSweepDelta(s7, s7.player.x, s7.player.y) < 0.01, 'beam aligned with player');
+run(s7, 0.2);
+assert.ok(s7.pingCd > 0, 'radar ping registered and put on cooldown');
+assert.ok(s7.evadeT < 0.5, 'radar ping wiped evasion progress');
+
+// 14. the surge swallows the search: heat fades faster inside the cell
+const s8 = createState(21);
+s8.wanted = 2;
+s8.storm.active = true; s8.storm.t = 999;
+s8.player.x = 1400; s8.player.y = 800;
+s8.storm.x = s8.player.x; s8.storm.y = s8.player.y;
+// no police anywhere near; evade timer should outrun the dry case
+run(s8, 1.0);
+assert.ok(s8.evadeT > 1.5, 'evasion accrues at boosted rate inside the surge');
+
 console.log('smoke: all checks passed');

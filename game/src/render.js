@@ -1,7 +1,8 @@
 // Canvas rendering: neon-night world, camera, entities, HUD (health/cash/stars/minimap/objective),
 // and the title / pause / game-over / contract-complete screens. All art is generated in code.
-import { WORLD, WATER_Y, COLORS, WANTED_MAX, HEALTH_MAX } from './config.js';
+import { WORLD, WATER_Y, COLORS, WANTED_MAX, HEALTH_MAX, STORM, RADAR } from './config.js';
 import { activeMarkers, objectiveText, currentMission, MISSIONS } from './missions.js';
+import { stormFactor } from './entities.js';
 
 function star(ctx, cx, cy, r, filled) {
   ctx.beginPath();
@@ -49,6 +50,8 @@ export function drawFrame(ctx, state, assets, viewW, viewH, best) {
   for (const car of state.cars) drawCar(ctx, car, state);
   if (state.player.onFoot) drawPlayerOnFoot(ctx, state.player, state);
   drawLampGlows(ctx, state, assets);
+  drawRadarSweep(ctx, state);
+  drawStorm(ctx, state);
   ctx.restore();
 
   drawVignette(ctx, viewW, viewH, state);
@@ -105,6 +108,68 @@ function drawMarkers(ctx, state) {
     ctx.fillStyle = m.color; ctx.fillRect(-9, -9, 18, 18); ctx.restore();
     ctx.shadowBlur = 0;
   }
+}
+
+function drawRadarSweep(ctx, state) {
+  const tower = state.city.radarTower; if (!tower) return;
+  const a = state.radarAngle;
+  // range ring
+  ctx.save();
+  ctx.strokeStyle = 'rgba(34,230,255,0.16)'; ctx.setLineDash([8, 14]); ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(tower.x, tower.y, RADAR.range, 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([]);
+  // rotating beam wedge
+  const grad = ctx.createRadialGradient(tower.x, tower.y, 20, tower.x, tower.y, RADAR.range);
+  grad.addColorStop(0, 'rgba(34,230,255,0.34)');
+  grad.addColorStop(1, 'rgba(34,230,255,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(tower.x, tower.y);
+  ctx.arc(tower.x, tower.y, RADAR.range, a - RADAR.sweep / 2, a + RADAR.sweep / 2);
+  ctx.closePath(); ctx.fill();
+  // leading edge line
+  ctx.strokeStyle = 'rgba(120,245,255,0.75)'; ctx.lineWidth = 2.4;
+  ctx.shadowColor = '#22e6ff'; ctx.shadowBlur = 10;
+  ctx.beginPath(); ctx.moveTo(tower.x, tower.y);
+  ctx.lineTo(tower.x + Math.cos(a) * RADAR.range, tower.y + Math.sin(a) * RADAR.range);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawStorm(ctx, state) {
+  const s = state.storm; if (!s || !s.active) return;
+  ctx.save();
+  // cell body: dark wall with a bruised teal-magenta heart
+  const grad = ctx.createRadialGradient(s.x, s.y, STORM.radius * 0.15, s.x, s.y, STORM.radius);
+  grad.addColorStop(0, 'rgba(10,14,34,0.88)');
+  grad.addColorStop(0.55, 'rgba(16,22,48,0.66)');
+  grad.addColorStop(1, 'rgba(16,22,48,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(s.x, s.y, STORM.radius, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,62,165,0.35)'; ctx.lineWidth = 3;
+  ctx.setLineDash([20, 26]); ctx.lineDashOffset = -state.time * 40;
+  ctx.beginPath(); ctx.arc(s.x, s.y, STORM.radius * 0.97, 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([]);
+  // rain streaks, slanted by the drift
+  const rng = (i) => Math.sin(i * 127.1 + Math.floor(state.time * 3) * 311.7) * 43758.5453 % 1;
+  ctx.strokeStyle = 'rgba(150,225,255,0.5)'; ctx.lineWidth = 1.6;
+  const slant = 0.35 + s.vx * 0.002;
+  for (let i = 0; i < 64; i += 1) {
+    const rx = s.x + (Math.abs(rng(i)) * 2 - 1) * STORM.radius * 0.92;
+    const phase = (state.time * 620 + i * 97) % (STORM.radius * 2);
+    const ry = s.y - STORM.radius + phase;
+    if (Math.hypot(rx - s.x, ry - s.y) > STORM.radius * 0.95) continue;
+    ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx - 10 * slant, ry + 34); ctx.stroke();
+  }
+  // lightning flicker every few seconds
+  const flash = Math.max(0, Math.sin(state.time * 1.7 + 1.3) - 0.965) / 0.035;
+  if (flash > 0) {
+    ctx.globalAlpha = flash * 0.5;
+    ctx.fillStyle = '#cfe8ff';
+    ctx.beginPath(); ctx.arc(s.x, s.y, STORM.radius * 0.8, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
 }
 
 function drawPed(ctx, ped) {
@@ -195,6 +260,11 @@ function drawVignette(ctx, w, h, state) {
   const grad = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.42, w / 2, h / 2, Math.max(w, h) * 0.75);
   grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(2,4,14,0.55)');
   ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+  const soak = stormFactor(state, state.player.x, state.player.y);
+  if (soak > 0) {
+    ctx.fillStyle = `rgba(6,10,26,${0.38 * soak})`;
+    ctx.fillRect(0, 0, w, h);
+  }
   if (state.player.hurtFlash > 0) {
     ctx.fillStyle = `rgba(255,40,60,${state.player.hurtFlash * 0.32})`;
     ctx.fillRect(0, 0, w, h);
@@ -219,6 +289,40 @@ function drawHUD(ctx, state, assets, w, h) {
   ctx.fillStyle = state.wanted > 0 ? '#ff7a6a' : COLORS.hudDim; ctx.font = '700 10px Arial';
   ctx.fillText(state.wanted > 0 ? 'H E A T' : 'C O O L', w - 180, 33);
   for (let i = 0; i < WANTED_MAX; i += 1) star(ctx, w - 172 + i * 34, 51, 10.5, i < state.wanted);
+  // storm status pill under the heat panel
+  if (state.storm && state.storm.active) {
+    panel(ctx, w - 196, 74, 180, 42, 'rgba(34,230,255,0.5)');
+    ctx.fillStyle = '#8ef2ff'; ctx.font = '800 11px Arial';
+    ctx.fillText('S T O R M   S U R G E', w - 180, 91);
+    ctx.fillStyle = COLORS.hudDim; ctx.font = '10px Arial';
+    ctx.fillText(`whiteout ${Math.ceil(state.storm.t)}s — markers pay +$${STORM.bonus} inside`, w - 180, 107);
+  } else if (state.storm && state.storm.nextIn < 8) {
+    ctx.fillStyle = 'rgba(142,242,255,0.55)'; ctx.font = '700 10px Arial'; ctx.textAlign = 'right';
+    ctx.fillText('STATIC ON THE WIRE…', w - 20, 84);
+    ctx.textAlign = 'left';
+  }
+  if ((state.stats.surge | 0) > 0) {
+    ctx.fillStyle = '#ffd34d'; ctx.font = '700 10px Arial';
+    ctx.fillText(`SURGE BONUS ×${state.stats.surge}`, 30, 106);
+  }
+  // harbor radar dial — watch the sweep when the heat is on
+  const dialR = 30, dialX = w - 48, dialY = h - 118;
+  const pingHot = state.pingCd > 0;
+  panel(ctx, dialX - dialR - 8, dialY - dialR - 8, (dialR + 8) * 2, (dialR + 8) * 2 + 14, pingHot ? 'rgba(255,80,80,0.6)' : 'rgba(34,230,255,0.35)');
+  ctx.strokeStyle = 'rgba(34,230,255,0.5)'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(dialX, dialY, dialR, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(dialX, dialY, dialR * 0.55, 0, Math.PI * 2); ctx.stroke();
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(dialX, dialY); ctx.arc(dialX, dialY, dialR, state.radarAngle - RADAR.sweep / 2, state.radarAngle + RADAR.sweep / 2); ctx.closePath();
+  ctx.fillStyle = 'rgba(34,230,255,0.3)'; ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = pingHot ? '#ff6a5e' : '#8ef2ff'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(dialX, dialY);
+  ctx.lineTo(dialX + Math.cos(state.radarAngle) * dialR, dialY + Math.sin(state.radarAngle) * dialR);
+  ctx.stroke();
+  ctx.fillStyle = COLORS.hudDim; ctx.font = '700 8px Arial'; ctx.textAlign = 'center';
+  ctx.fillText(pingHot ? 'PINGED' : 'HBR RADAR', dialX, dialY + dialR + 11);
+  ctx.textAlign = 'left';
   // objective banner
   const mission = currentMission(state);
   if (mission && state.screen === 'play') {
@@ -304,6 +408,7 @@ function drawTitle(ctx, state, w, h, best) {
   ctx.fillStyle = 'rgba(232,236,248,0.9)'; ctx.font = '13px Arial';
   ctx.fillText('WASD / arrows — move & drive      E — steal or ride a car      F / click — punch', w / 2, by + 94);
   ctx.fillText('Esc / P — pause      Close contracts around the harbor to clear the tide', w / 2, by + 114);
+  ctx.fillText('Storm surges pay +$250 at every marker — the radar beam does not forgive heat', w / 2, by + 132);
   const done = best.complete ? 'CITY CLEAR' : `${best.missions}/3 contracts`;
   ctx.fillStyle = '#ffd34d'; ctx.font = '700 15px Arial';
   ctx.fillText(`BEST RUN — $${best.cash.toLocaleString('en-US')}  ·  ${done}`, w / 2, by + 148);
@@ -355,6 +460,7 @@ function drawComplete(ctx, state, w, h, best) {
     ['CASH EARNED', `$${state.stats.earned.toLocaleString('en-US')}`],
     ['CARS TAKEN', `${state.stats.takenCars}`],
     ['STRIKES ON RECORD', `${state.stats.crimes}`],
+    ['SURGE BONUSES', `${state.stats.surge | 0}`],
     ['BEST NIGHT', `$${best.cash.toLocaleString('en-US')}${best.complete ? '  ·  CITY CLEAR' : ''}`],
   ];
   let y = h * 0.46;

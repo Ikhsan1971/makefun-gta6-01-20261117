@@ -1,6 +1,9 @@
 // Three-contract story: "TIDE TABLES" → "CRATE COUNT" → "NEON GETAWAY".
 // Missions advance by reaching glowing markers; each pays out and the last clears the tide.
+// Markers tagged during a Storm Surge pay a Storm Tide bonus on top of the contract money.
 import { saveBest } from './save.js';
+import { STORM } from './config.js';
+import { inStorm } from './entities.js';
 
 export const MISSIONS = [
   {
@@ -55,6 +58,17 @@ export function resetMissionState(state) {
   state.missions = { index: 0, stage: 0, taken: [] };
 }
 
+/** Storm Tide payout: markers tagged while the player rides inside the surge pay extra. */
+export function grantSurgeBonus(state) {
+  if (!inStorm(state, state.player.x, state.player.y)) return 0;
+  state.player.cash += STORM.bonus;
+  state.stats.earned += STORM.bonus;
+  state.stats.surge = (state.stats.surge | 0) + 1;
+  return STORM.bonus;
+}
+
+const surgeTag = (bonus) => (bonus > 0 ? `  ·  SURGE +$${bonus}` : '');
+
 /** Advance missions when the player touches a marker. Returns true if something happened. */
 export function checkTriggers(state, audio) {
   const m = currentMission(state); if (!m) return false;
@@ -65,32 +79,35 @@ export function checkTriggers(state, audio) {
 
   if (st.kind === 'goto') {
     if (!hit(st.x, st.y)) return false;
+    const bonus = grantSurgeBonus(state);
     s.stage += 1;
-    if (s.stage >= m.stages.length) return finishMission(state, m, audio);
-    state.banner = { text: 'LEDGER SECURED', sub: 'Checkpoint moved — follow the beacon', timer: 2.4 };
+    if (s.stage >= m.stages.length) return finishMission(state, m, audio, bonus);
+    state.banner = { text: 'LEDGER SECURED', sub: `Checkpoint moved — follow the beacon${surgeTag(bonus)}`, timer: 2.4 };
     audio.missionStage();
     return true;
   }
   if (st.kind === 'collect') {
     const idx = CRATES.findIndex((c, i) => !s.taken.includes(i) && hit(c.x, c.y));
     if (idx === -1) return false;
+    const bonus = grantSurgeBonus(state);
     s.taken.push(idx);
     audio.missionStage();
-    if (s.taken.length >= CRATES.length) return finishMission(state, m, audio);
-    state.banner = { text: `CRATE ${s.taken.length}/${CRATES.length}`, sub: 'Cargo secured', timer: 1.6 };
+    if (s.taken.length >= CRATES.length) return finishMission(state, m, audio, bonus);
+    state.banner = { text: `CRATE ${s.taken.length}/${CRATES.length}`, sub: `Cargo secured${surgeTag(bonus)}`, timer: 1.6 };
     return true;
   }
   // checkpoints
   const idx = GATES.findIndex((c, i) => !s.taken.includes(i) && hit(c.x, c.y));
   if (idx === -1) return false;
+  const bonus = grantSurgeBonus(state);
   s.taken.push(idx);
   audio.missionStage();
-  if (s.taken.length >= GATES.length) return finishMission(state, m, audio);
-  state.banner = { text: `GATE ${s.taken.length}/${GATES.length}`, sub: 'Clean time — keep moving', timer: 1.6 };
+  if (s.taken.length >= GATES.length) return finishMission(state, m, audio, bonus);
+  state.banner = { text: `GATE ${s.taken.length}/${GATES.length}`, sub: `Clean time — keep moving${surgeTag(bonus)}`, timer: 1.6 };
   return true;
 }
 
-function finishMission(state, mission, audio) {
+function finishMission(state, mission, audio, bonus = 0) {
   const s = state.missions;
   state.player.cash += mission.reward;
   state.stats.earned += mission.reward;
@@ -98,11 +115,11 @@ function finishMission(state, mission, audio) {
   audio.cash(); audio.missionDone();
   if (s.index >= MISSIONS.length) {
     state.complete = true;
-    state.banner = { text: 'NEON TIDE — CLEAR', sub: `All contracts closed  +$${mission.reward}`, timer: 4 };
+    state.banner = { text: 'NEON TIDE — CLEAR', sub: `All contracts closed  +$${mission.reward}${surgeTag(bonus)}`, timer: 4 };
     state.screen = 'complete';
     saveBest({ cash: state.stats.earned, missions: MISSIONS.length, complete: true });
   } else {
-    state.banner = { text: 'CONTRACT CLOSED', sub: `${mission.name}  +$${mission.reward}`, timer: 3.4 };
+    state.banner = { text: 'CONTRACT CLOSED', sub: `${mission.name}  +$${mission.reward}${surgeTag(bonus)}`, timer: 3.4 };
     saveBest({ cash: state.stats.earned, missions: s.index, complete: false });
   }
   return true;

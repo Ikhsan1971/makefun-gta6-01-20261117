@@ -83,5 +83,12 @@ export class AudioSys {
     notes.forEach((n, i) => this.tone(n, 0.22, 'triangle', 0.17, null, i * 0.13));
   }
   blip() { this.tone(740, 0.09, 'sine', 0.12); }
+  stormWarning() {
+    this.noise(1.4, 0.22, 240);
+    this.tone(58, 1.3, 'sawtooth', 0.2, 44);
+    this.tone(392, 0.3, 'triangle', 0.1, null, 0.2);
+    this.tone(392, 0.3, 'triangle', 0.1, null, 0.65);
+  }
+  radarPing() { this.tone(1180, 0.08, 'square', 0.14); this.tone(1180, 0.08, 'square', 0.14, null, 0.14); }
   uiConfirm() { this.tone(392, 0.1, 'square', 0.12); this.tone(523, 0.16, 'square', 0.12, null, 0.08); }
 }

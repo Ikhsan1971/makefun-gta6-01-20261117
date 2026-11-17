@@ -1,7 +1,8 @@
 // Port Meridian: Neon Tide — boot, screen state machine and the frame loop.
 // ?shot=cover|car|chase|result poses the real game for deterministic screenshots;
-// ?seed=<n> reseeds the city (default 1337).
-import { WORLD, STEP } from './config.js';
+// ?seed=<n> reseeds the city (default 1337); ?storm=1 force-opens a Storm Surge on the
+// harbor at boot (handy for previewing the surge mechanic and for screenshots).
+import { WORLD, STEP, STORM } from './config.js';
 import { createState, update, enterOrExitCar, punch, nearestCar } from './entities.js';
 import { createCityLayer } from './city.js';
 import { createMinimap, drawFrame } from './render.js';
@@ -31,14 +32,28 @@ assets.minimap = createMinimap(assets.cityLayer);
 const input = new Input(canvas);
 const audio = new AudioSys();
 const shotMode = shotName !== null;
+const FORCE_STORM = params.get('storm') === '1';
+
+function forceStorm(s) {
+  // pin a fat, slow storm cell right over the harbor approach for previews
+  s.storm.active = true;
+  s.storm.x = s.player.x + 180;
+  s.storm.y = s.player.y - 120;
+  s.storm.vx = 12; s.storm.vy = -6;
+  s.storm.t = STORM.duration * 10;
+  s.storm.nextIn = STORM.interval;
+}
+
 if (shotMode) {
   stageShot(state, SHOTS.includes(shotName) ? shotName : 'cover');
+  if (FORCE_STORM) forceStorm(state);
   if (shotName === 'result') best = { cash: 2900, missions: MISSIONS.length, complete: true };
-}
+} else if (FORCE_STORM) forceStorm(state);
 
 function freshRun(screen) {
   state = createState(SEED);
   state.screen = screen;
+  if (FORCE_STORM) forceStorm(state);
   return state;
 }
 
@@ -88,6 +103,12 @@ function loop() {
   }
 
   drawFrame(ctx, state, assets, canvas.width, canvas.height, best);
+  // a fresh surge slaps the hull — nudge the camera so the moment reads on screen
+  const stormNow = !!(state.storm && state.storm.active);
+  if (stormNow !== loop.wasStorm) {
+    loop.wasStorm = stormNow;
+    if (stormNow) state.shake = Math.max(state.shake, 2.5);
+  }
   input.endFrame();
   requestAnimationFrame(loop);
 }

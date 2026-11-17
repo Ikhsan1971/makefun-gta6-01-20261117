@@ -17,6 +17,13 @@ export const CAR_TURN = 2.6;
 export const HEALTH_MAX = 100;
 export const WANTED_MAX = 5;
 
+// Neon Tide — Storm Surge: a drifting storm cell whites out the harbor; riders of the surge
+// gather bonus cash on contract markers, but car handling is heavier in the rain.
+export const STORM = { interval: 34, duration: 13, radius: 320, speed: 46, drift: 42, bonus: 250, steerLoss: 0.72, accelLoss: 0.85, evadeBoost: 2.2 };
+// Harbor radar: the lighthouse sweeps the bay; a hot player caught in the beam is pinged and
+// any heat-evasion progress is reset.
+export const RADAR = { period: 7.5, sweep: 0.5, range: 640, pingCooldown: 3 };
+
 export const NEON = ['#ff3ea5', '#22e6ff', '#b6ff2e', '#ffb02e', '#a06bff', '#2effc4'];
 
 export const COLORS = {

@@ -55,13 +55,15 @@ export function buildCity(seed) {
     { x: 430, y: WATER_Y + 26 }, { x: 1370, y: WATER_Y + 40 }, { x: 1870, y: WATER_Y + 30 },
   ];
   const lighthouse = { x: 1975, y: WATER_Y + 235 };
+  // harbor radar tower on the middle pier — sweeps the bay for hot targets
+  const radarTower = { x: 1275, y: WATER_Y + 165 };
   const lamps = [];
   for (const rx of ROAD_XS) for (const ry of ROAD_YS) {
     lamps.push({ x: rx - ROAD_W / 2 - 8, y: ry - ROAD_W / 2 - 8 });
     lamps.push({ x: rx + ROAD_W / 2 + 8, y: ry + ROAD_W / 2 + 8 });
   }
   return {
-    buildings, piers, cranes, lighthouse, lamps,
+    buildings, piers, cranes, lighthouse, radarTower, lamps,
     spawn: { x: 920, y: 1140 },
     neonSignSpot: { x: 1300, y: 470 },
   };
@@ -167,6 +169,18 @@ export function createCityLayer(city) {
     g.beginPath(); g.moveTo(c.x, WATER_Y + 80); g.lineTo(c.x, c.y - 90); g.lineTo(c.x + 90, c.y - 90); g.stroke();
     g.lineWidth = 5; g.beginPath(); g.moveTo(c.x + 78, c.y - 90); g.lineTo(c.x + 78, c.y - 20); g.stroke();
     g.fillStyle = '#ffb02e'; g.fillRect(c.x - 4, c.y - 4, 8, 8);
+  }
+  // radar tower: lattice mast + dome on the middle pier
+  const rt = city.radarTower;
+  if (rt) {
+    g.strokeStyle = '#1a2340'; g.lineWidth = 9;
+    g.beginPath(); g.moveTo(rt.x - 14, rt.y + 34); g.lineTo(rt.x, rt.y - 46); g.lineTo(rt.x + 14, rt.y + 34); g.stroke();
+    g.lineWidth = 4; g.beginPath(); g.moveTo(rt.x - 9, rt.y + 12); g.lineTo(rt.x + 9, rt.y + 12); g.stroke();
+    g.beginPath(); g.moveTo(rt.x - 5, rt.y - 14); g.lineTo(rt.x + 5, rt.y - 14); g.stroke();
+    g.fillStyle = '#0e1730'; g.beginPath(); g.arc(rt.x, rt.y - 52, 13, Math.PI, 0); g.fill();
+    g.strokeStyle = '#22e6ff'; g.shadowColor = '#22e6ff'; g.shadowBlur = 12; g.lineWidth = 2.4;
+    g.beginPath(); g.arc(rt.x, rt.y - 52, 13, Math.PI, 0); g.stroke(); g.shadowBlur = 0;
+    g.fillStyle = '#22e6ff'; g.beginPath(); g.arc(rt.x, rt.y - 52, 2.6, 0, Math.PI * 2); g.fill();
   }
   // lighthouse with rotating beacon base
   const lh = city.lighthouse;
