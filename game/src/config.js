@@ -23,6 +23,10 @@ export const STORM = { interval: 34, duration: 13, radius: 320, speed: 46, drift
 // Harbor radar: the lighthouse sweeps the bay; a hot player caught in the beam is pinged and
 // any heat-evasion progress is reset.
 export const RADAR = { period: 7.5, sweep: 0.5, range: 640, pingCooldown: 3 };
+// Witnesses: peds who watch a crime call the docks patrol after a beat of silence. Three calls, one star.
+export const WITNESS = { radius: 150, delay: 2.6, quorum: 3 };
+// Player hull damage: crashes and cruisers chew through the car; a scrap engine will not move.
+export const HULL = { crashScale: 0.125, max: 100, smokeAt: 60, deadAt: 100 };
 
 export const NEON = ['#ff3ea5', '#22e6ff', '#b6ff2e', '#ffb02e', '#a06bff', '#2effc4'];
 

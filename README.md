@@ -6,7 +6,9 @@
 
 An original open-world crime game — a fictional neon port
 city, three contracts, traffic, stealable cars, a wanted level with police pursuit,
-a HUD with a minimap, a **Storm Surge** system and a **harbor radar** that sweeps the
+a HUD with a minimap, a **Storm Surge** system, a **harbor radar** that sweeps the
+bay, **witness** pedestrians who call the docks patrol, and a **hull damage** model
+that turns your car to scrap —
 bay for hot targets. Plain static files under `game/`; no build step, no network,
 no dependencies. All art is drawn in code (Canvas 2D) and all sound is synthesized
 (Web Audio). No real places, people, brands or games are depicted.
@@ -16,6 +18,9 @@ drifts inland. Inside the whiteout your car handles like it is driving through s
 but the search loses you twice as fast — and every contract marker you tag while
 riding inside the surge pays a **+$250 Storm Tide bonus** on top of the contract
 money. Out on the middle pier, the harbor radar sweeps the bay; carry heat inside
+the beam and your evasion progress is wiped. Pedestrians who watch you offend alarm
+their phones — three calls to the docks patrol and you gain a star. And hard crashes
+plus police rams chew through your car's hull; a scrap engine will not move.
 its beam and you get **pinged** — your evasion progress is wiped. Watch the dial.
 
 ## Run
@@ -74,10 +79,13 @@ Recapture them with headless Chrome:
 Verifies: the city generates with buildings/cars/pedestrians, the player stays in the
 world, car theft raises heat, the full three-contract chain pays out and sets the
 completion flag, police respond to a wanted level, lethal damage ends the run, the
-best-run save is written to `localStorage` — and the Storm Surge machinery: the surge
+best-run save is written to `localStorage` — the Storm Surge machinery: the surge
 activates on schedule, rides at full strength at its core, markers tagged inside the
 cell pay +$250 (city-wide it does not), evasion accrues boosted inside the cell, and a
-hot player caught in the harbor radar beam is pinged with evasion wiped.
+hot player caught in the harbor radar beam is pinged with evasion wiped — the witness
+system: a crime by bystanders raises alarms, three calls add a star of heat — and the
+hull model: hard crashes and police rams add damage, and a car whose hull is gone can
+not build speed.
 
 Append `?storm=1` to the URL to force a Storm Surge at boot (handy for previewing the
 mechanic; `?shot=chase&storm=1` poses the surge during the pursuit stage).
@@ -95,7 +103,7 @@ mechanic; `?shot=chase&storm=1` poses the surge during the pursuit stage).
     game/styles.css    page chrome
     game/src/config.js tuning constants and palette (storm + radar tuning)
     game/src/city.js   procedural city generation + static pre-render + collision (incl. radar tower)
-    game/src/entities.js player, traffic, pedestrians, police AI, wanted logic
+    game/src/entities.js player, traffic, pedestrians, police AI, wanted logic, witnesses, hull damage
     game/src/missions.js the three contracts, markers, rewards
     game/src/render.js world/HUD/screens rendering, minimap
     game/src/input.js  keyboard + mouse

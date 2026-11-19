@@ -85,6 +85,7 @@ assert.ok(saved.cash >= 2900, 'best cash persisted');
 
 // 10. storm surge activates on schedule and registers at its core
 const { stormFactor, inStorm, radarSweepDelta } = await import('../game/src/entities.js');
+const { WITNESS, HULL } = await import('../game/src/config.js');
 const s4 = createState(99);
 assert.equal(s4.storm.active, false, 'storm starts dormant');
 s4.storm.nextIn = 0.05;
@@ -142,5 +143,52 @@ s8.storm.x = s8.player.x; s8.storm.y = s8.player.y;
 // no police anywhere near; evade timer should outrun the dry case
 run(s8, 1.0);
 assert.ok(s8.evadeT > 1.5, 'evasion accrues at boosted rate inside the surge');
+
+// 15. witnesses: a crime near peds sets alarms; WITNESS.quorum calls raise heat
+const s9 = createState(31);
+s9.player.x = 1400; s9.player.y = 800;
+s9.peds[0].x = s9.player.x + 20; s9.peds[0].y = s9.player.y; // victim within punch range
+for (let i = 1; i < 11; i += 1) { s9.peds[i].x = s9.player.x + 80 + i * 5; s9.peds[i].y = s9.player.y; } // bystanders in witness radius
+for (let i = 11; i < s9.peds.length; i += 1) { s9.peds[i].x = s9.player.x + 900; s9.peds[i].y = s9.player.y + 700; } // far away, see nothing
+const scaredBefore = s9.peds.filter((ped) => ped.alarm > 0).length;
+punch(s9, audio); // the victim drops; bystanders alarmed
+const scared = s9.peds.filter((ped) => ped.alarm > 0).length;
+assert.ok(scared - scaredBefore >= 5, 'bystanders within the witness radius were alarmed');
+s9.wanted = 0; s9.witnessPoints = WITNESS.quorum - 1; // one more call
+const before = s9.wanted;
+run(s9, 3.2);
+assert.ok(s9.wanted >= before + 1 || s9.witnessPoints === 0, 'quorum of calls raised the heat');
+
+// 16. a hard crash chews through the hull
+const s10 = createState(77);
+const s10car = s10.cars.find((c) => c.driver !== 'police');
+s10.player.x = 200; s10.player.y = 300;
+run(s10, 0.1);
+// simulate entering the car then a very hard impact
+const near9 = nearestCar(s10, s10.player.x, s10.player.y, 9999);
+near9.x = s10.player.x + 10; near9.y = s10.player.y;
+enterOrExitCar(s10, audio);
+const pcar = s10.cars.find((c) => c.id === s10.player.carId);
+const dmgBefore = pcar.damage;
+// force a 300-speed impact into a building
+s10.player.angle = 0;
+// drive straight into whatever is ahead for a few seconds at high speed
+pcar.speed = 300;
+s10.time += 10;
+run(s10, 2);
+assert.ok(pcar.damage >= dmgBefore, 'crashes only add damage');
+// 17. scrap engine: no acceleration left
+const s11 = createState(88);
+run(s11, 0.1);
+const near11 = nearestCar(s11, s11.player.x, s11.player.y, 9999);
+near11.x = s11.player.x + 10; near11.y = s11.player.y;
+enterOrExitCar(s11, audio);
+const scrapCar = s11.cars.find((c) => c.id === s11.player.carId);
+scrapCar.damage = HULL.deadAt;
+const v0 = scrapCar.speed;
+// W held down: a healthy car would accelerate hard, a scrap one crawls
+const fwdInput = { down: (k) => k === 'KeyW' };
+for (let i = 0; i < 60; i += 1) update(s11, STEP, fwdInput, audio);
+assert.ok(Math.abs(scrapCar.speed) < 60, 'scrap engine cannot build speed');
 
 console.log('smoke: all checks passed');

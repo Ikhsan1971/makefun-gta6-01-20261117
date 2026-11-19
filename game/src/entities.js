@@ -1,7 +1,7 @@
 // Simulation: the player (on foot / driving), traffic, pedestrians, police response and crime heat.
 import { WORLD, WATER_Y, ROAD_XS, ROAD_YS, STEP, PLAYER_FOOT_SPEED, CAR_MAX_SPEED,
   CAR_ACCEL, CAR_BRAKE, CAR_REVERSE, CAR_TURN, HEALTH_MAX, WANTED_MAX, NEON,
-  STORM, RADAR } from './config.js';
+  STORM, RADAR, WITNESS, HULL } from './config.js';
 import { createRandom, pick } from './random.js';
 import { buildCity, resolveCollision, pointInBuilding } from './city.js';
 
@@ -22,6 +22,7 @@ export function createState(seed = 1337) {
     player: { x: city.spawn.x, y: city.spawn.y, angle: 0.6, health: HEALTH_MAX, cash: 0, onFoot: true, carId: -1, punchCd: 0, hurtCd: 0, hurtFlash: 0 },
     cars: [], peds: [],
     wanted: 0, evadeT: 0, spawnT: 0, decayMsg: '',
+    witnessPoints: 0,
     storm: { active: false, x: WORLD.w * 0.5, y: WATER_Y + 80, vx: 0, vy: -STORM.speed, t: 0, nextIn: STORM.interval * 0.6 },
     radarAngle: 0, pingCd: 0,
     missions: { index: 0, stage: 0, taken: [] },
@@ -48,7 +49,7 @@ export function createState(seed = 1337) {
   for (let i = 0; i < 26; i += 1) {
     let x = rng() * WORLD.w, y = rng() * (WATER_Y - 60);
     for (let t = 0; t < 30 && pointInBuilding(city, x, y); t += 1) { x = rng() * WORLD.w; y = rng() * (WATER_Y - 60); }
-    state.peds.push({ x, y, angle: rng() * Math.PI * 2, speed: 0, down: 0, hue: pick(rng, NEON), wanderT: rng() * 3 });
+    state.peds.push({ x, y, angle: rng() * Math.PI * 2, speed: 0, down: 0, hue: pick(rng, NEON), wanderT: rng() * 3, alarm: 0 });
   }
   return state;
 }
@@ -59,6 +60,7 @@ export function spawnCar(state, kind, x, y, angle, driver) {
     kind, x, y, angle, speed: 0, driver,
     color: pick(state.rng, CAR_COLORS),
     police: false, wreck: 0, decisionT: state.rng() * 2 + 1,
+    damage: 0, blockade: false,
   };
   state.cars.push(car);
   return car;
@@ -121,6 +123,19 @@ export function radarSweepDelta(state, x, y) {
   return Math.abs(diff);
 }
 
+/** Peds near a crime get spooked; after a beat they call the docks patrol (WITNESS.quorum calls = +1 star). */
+export function witnessCall(state, x, y, radius = WITNESS.radius) {
+  let spooked = 0;
+  for (const ped of state.peds) {
+    if (ped.down > 0) continue;
+    if (Math.hypot(ped.x - x, ped.y - y) > radius) continue;
+    if (ped.alarm <= 0) ped.alarm = WITNESS.delay;
+    else ped.alarm = Math.max(ped.alarm, WITNESS.delay * 0.6);
+    spooked += 1;
+  }
+  return spooked;
+}
+
 export function nearestCar(state, x, y, maxDist) {
   let best = null, bestD = maxDist;
   for (const car of state.cars) {
@@ -138,6 +153,7 @@ export function enterOrExitCar(state, audio) {
     if (!car) return false;
     p.onFoot = false; p.carId = car.id; car.driver = 'player';
     addWanted(state, car.stolen ? 0 : 1);
+    if (!car.stolen) witnessCall(state, car.x, car.y, 130);
     car.stolen = true; state.stats.takenCars += 1;
     state.message = 'Grand theft auto — the port noticed'; state.msgT = 2.2;
     audio.engineStart();
@@ -164,7 +180,11 @@ export function punch(state, audio) {
     if (ped.down > 0) continue;
     if (Math.hypot(ped.x - p.x, ped.y - p.y) < 48) { ped.down = 4; ped.speed = 0; hit = true; }
   }
-  if (hit) { addWanted(state, 1); state.shake = Math.max(state.shake, 3); }
+  if (hit) {
+    addWanted(state, 1);
+    witnessCall(state, p.x, p.y, WITNESS.radius);
+    state.shake = Math.max(state.shake, 3);
+  }
   audio.punch(hit);
 }
 
@@ -229,9 +249,11 @@ function updateDriving(state, dt, input, audio) {
   const p = state.player;
   const car = carOf(state); if (!car) { p.onFoot = true; return; }
   const stats = KIND_STATS[car.kind];
+  const scrap = car.damage >= HULL.deadAt;
+  const hull = scrap ? 0 : Math.max(0.35, 1 - car.damage / 170); // a hurt motor still turns, barely
   const soaked = inStorm(state, car.x, car.y);
-  const grip = soaked ? STORM.steerLoss : 1;
-  const push = soaked ? STORM.accelLoss : 1;
+  const grip = (soaked ? STORM.steerLoss : 1) * (0.6 + hull * 0.4);
+  const push = (soaked ? STORM.accelLoss : 1) * hull;
   const fwd = input.down('KeyW') || input.down('ArrowUp');
   const back = input.down('KeyS') || input.down('ArrowDown');
   const left = input.down('KeyA') || input.down('ArrowLeft');
@@ -239,7 +261,7 @@ function updateDriving(state, dt, input, audio) {
   if (fwd) car.speed += stats.accel * push * dt;
   else if (back) car.speed -= (car.speed > 20 ? CAR_BRAKE : CAR_ACCEL * 0.7) * dt;
   else car.speed -= Math.sign(car.speed) * Math.min(Math.abs(car.speed), 90 * dt);
-  car.speed = Math.max(-CAR_REVERSE, Math.min(stats.max * (soaked ? 0.92 : 1), car.speed));
+  car.speed = Math.max(-CAR_REVERSE, Math.min(stats.max * (soaked ? 0.92 : 1) * (scrap ? 0.06 : Math.max(0.4, hull)), car.speed));
   const steer = (left ? -1 : 0) + (right ? 1 : 0);
   if (steer !== 0 && Math.abs(car.speed) > 12) {
     car.angle += steer * stats.turn * grip * dt * Math.min(1, Math.abs(car.speed) / 130) * Math.sign(car.speed);
@@ -248,7 +270,10 @@ function updateDriving(state, dt, input, audio) {
   const ny = car.y + Math.sin(car.angle) * car.speed * dt;
   const fixed = resolveCollision(state.city, nx, ny, 17);
   const crashed = Math.abs(fixed.x - nx) > 0.5 || Math.abs(fixed.y - ny) > 0.5;
-  if (crashed && Math.abs(car.speed) > 140) { audio.crash(); state.shake = Math.max(state.shake, 5); }
+  if (crashed && Math.abs(car.speed) > 140) {
+    audio.crash(); state.shake = Math.max(state.shake, 5);
+    car.damage = Math.min(HULL.max, car.damage + 12 + Math.abs(car.speed) * HULL.crashScale);
+  }
   if (crashed) car.speed *= 0.45;
   car.x = fixed.x; car.y = fixed.y;
   p.x = car.x; p.y = car.y; p.angle = car.angle;
@@ -258,9 +283,15 @@ function updateDriving(state, dt, input, audio) {
     for (const ped of state.peds) {
       if (ped.down > 0) continue;
       if (Math.hypot(ped.x - car.x, ped.y - car.y) < 24) {
-        ped.down = 5; addWanted(state, 1); audio.thud(); state.shake = Math.max(state.shake, 4);
+        ped.down = 5; addWanted(state, 1); witnessCall(state, car.x, car.y, WITNESS.radius); audio.thud(); state.shake = Math.max(state.shake, 4);
       }
     }
+  }
+  // hull damage: a scrap engine barely turns the wheels
+  if (scrap && !car.scrapMsg) {
+    car.scrapMsg = true;
+    state.message = 'The engine is scrap — step out with E';
+    state.msgT = 3;
   }
 }
 
@@ -293,6 +324,18 @@ function updatePeds(state, dt) {
   const p = state.player;
   for (const ped of state.peds) {
     if (ped.down > 0) { ped.down -= dt; continue; }
+    if (ped.alarm > 0) {
+      ped.alarm -= dt;
+      if (ped.alarm <= 0) {
+        state.witnessPoints += 1;
+        if (state.witnessPoints >= WITNESS.quorum) {
+          state.witnessPoints = 0;
+          addWanted(state, 1);
+          state.message = 'The docks heard every call — +1 star of heat';
+          state.msgT = 2.4;
+        }
+      }
+    }
     ped.wanderT -= dt;
     const danger = !p.onFoot && Math.abs(carOf(state)?.speed ?? 0) > 60 && Math.hypot(p.x - ped.x, p.y - ped.y) < 130;
     if (danger) { // flee the car
@@ -327,6 +370,10 @@ function updatePolice(state, dt, audio) {
       p.hurtCd = 0.85; p.hurtFlash = 0.4;
       damagePlayer(state, p.onFoot ? 9 : 13, audio);
       cop.wreck += 9; cop.speed *= 0.75;
+      if (!p.onFoot) {
+        const pcar = carOf(state);
+        if (pcar) pcar.damage = Math.min(HULL.max, pcar.damage + 9);
+      }
       state.shake = Math.max(state.shake, 6);
     }
   }
